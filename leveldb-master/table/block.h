@@ -70,10 +70,10 @@ class Block {
   // NumRestarts()方法从data_数组中根据block的内存布局获取到重启点的个数。
   uint32_t NumRestarts() const;
 
-  // data_就是block存放具体内容的地址。
+  // data_就是block存放具体内容的内存首地址。
   const char* data_;
 
-  // size_就是block的大小，也就是data_字符数组的大小。
+  // size_就是block的大小，也就是data_所指向的内存的大小。
   size_t size_;
 
   // restart_offset_就是“重启点”数组首地址在整个Block内的偏移。
