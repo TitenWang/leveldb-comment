@@ -1,21 +1,3 @@
-# leveldb_comment
-详细且纯粹的leveldb源码注解，注解总结链接：https://TitenWang.github.io
-
-# 注解进度
-
-2017-12-24  注解用于封装leveldb所有操作结果的Status模块(util/status.cc、include/leveldb/status.h)，内存管理模块(util/arena.cc、util/arena.h)，整型序列化模块(util/coding.cc、util/coding.h)。
-
-2017-12-30  注解操作日志模块(db/log_format.h、db/log_writer.cc、db/log_writer.h、db/log_reader.cc、db/log_reader.h)、LRUCache模块(util/cache.cc、include/leveldb/cache.h)
-
-2017-12-31  注解布隆过滤器模块(util/bloom.cc、util/bloom.h)，memtable模块(db/memtable.cc、db/memtable.h)，跳表实现(db/skiplist.h)，leveldb内部多种key封装(db/dbformat.cc、db/dbformat.h)
-
-2018-01-03  注解Block模块(table/block.h、table/block.cc、table/block_builder.h、table/block_builder.cc)，BlockHandle/Footer模块(table/format.h、table/format.cc)
-
-2018-01-06  注解二层迭代器(table/two_level_iterator.h、table/two_level_iterator.cc)，Table模块(table/table.cc、include/leveldb/table.h、table/table_builder.cc、include/leveldb/talbe_builder.h)，FilterBlock模块(table/filter_block.h、table/filter_block.cc)
-
-# 注解风格
-注解风格和leveldb本身的注释风格保持一致。以table/block.h的注释为例，如下：
-```c
 // Copyright (c) 2011 The LevelDB Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
@@ -111,4 +93,3 @@ class Block {
 }  // namespace leveldb
 
 #endif  // STORAGE_LEVELDB_TABLE_BLOCK_H_
-```
