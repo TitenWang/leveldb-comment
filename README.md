@@ -13,6 +13,8 @@
 
 2018-01-06  注解二层迭代器(table/two_level_iterator.h、table/two_level_iterator.cc)，Table模块(table/table.cc、include/leveldb/table.h、table/table_builder.cc、include/leveldb/talbe_builder.h)，FilterBlock模块(table/filter_block.h、table/filter_block.cc)
 
+2018-01-14  注解版本变更信息类VersionEdit(db/version_edit.cc、db/version_edit.h)，用于构造Version的类VersionSet::Builder(db/version_set.cc、db/version_set.h)
+
 # 注解风格
 注解风格和leveldb本身的注释风格保持一致。以table/block.h的注释为例，如下：
 ```c
