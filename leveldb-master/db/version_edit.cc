@@ -11,6 +11,7 @@ namespace leveldb {
 
 // Tag numbers for serialized VersionEdit.  These numbers are written to
 // disk and should not be changed.
+// 序列化VersionEdit类实例信息的时候使用的tag标签。
 enum Tag {
   kComparator           = 1,
   kLogNumber            = 2,
@@ -38,7 +39,12 @@ void VersionEdit::Clear() {
   new_files_.clear();
 }
 
+// VersionEdit类实例的序列化方法。序列化每一部分内容的时候，都是先序列化对应的tag标签
+// 信息，然后在序列化具体内容。序列化的信息包括：比较器、log number、prev log number、
+// next file number、last sequence、compact pointer、deleted file和new file。序列化
+// 其实就是将这些信息写到字符串中，不同标签类型对应的内容采用的序列化方式是不一样的。
 void VersionEdit::EncodeTo(std::string* dst) const {
+  // 如果有比较器，那么就序列化比较器信息
   if (has_comparator_) {
     PutVarint32(dst, kComparator);
     PutLengthPrefixedSlice(dst, comparator_);
@@ -85,6 +91,8 @@ void VersionEdit::EncodeTo(std::string* dst) const {
   }
 }
 
+// GetInternalKey()函数用于从input中解码出一个InternalKey信息，并用返回值来标识
+// 解码的成功与否。
 static bool GetInternalKey(Slice* input, InternalKey* dst) {
   Slice str;
   if (GetLengthPrefixedSlice(input, &str)) {
@@ -95,6 +103,7 @@ static bool GetInternalKey(Slice* input, InternalKey* dst) {
   }
 }
 
+// GetLevel()函数用于从input中解码出一个level信息，并用返回值来标识解码的成功与否。
 static bool GetLevel(Slice* input, int* level) {
   uint32_t v;
   if (GetVarint32(input, &v) &&
@@ -106,6 +115,8 @@ static bool GetLevel(Slice* input, int* level) {
   }
 }
 
+// DecodeFrom()方法用于从input中解码出一个VersionEdit实例信息。其中的解码(反序列化)的方式
+// 正对应着EncodeTo所使用的序列化方式。
 Status VersionEdit::DecodeFrom(const Slice& src) {
   Clear();
   Slice input = src;
@@ -119,6 +130,9 @@ Status VersionEdit::DecodeFrom(const Slice& src) {
   Slice str;
   InternalKey key;
 
+  // 先从input中反序列化出一个标签，然后根据标签来反序列化出对应的具体内容，因为
+  // 不同标签类型的内容，所采用的序列化方式有所不同，所以需要先知道具体标签，才能
+  // 选择合适的反序列化方式。
   while (msg == NULL && GetVarint32(&input, &tag)) {
     switch (tag) {
       case kComparator:
@@ -202,6 +216,8 @@ Status VersionEdit::DecodeFrom(const Slice& src) {
     msg = "invalid tag";
   }
 
+  // 如果msg不为空，说明在反序列过程中出现的错误，那么就返回封装了对应错误信息的
+  // 的Status实例。
   Status result;
   if (msg != NULL) {
     result = Status::Corruption("VersionEdit", msg);
@@ -209,6 +225,8 @@ Status VersionEdit::DecodeFrom(const Slice& src) {
   return result;
 }
 
+// DebugString()方法用于将VersionEdit类实例中的信息以一种可读性较好的方式存放到了
+// 字符串中，用于可以将字符串中的信息打印出来，从而看到VersionEdit中的信息。
 std::string VersionEdit::DebugString() const {
   std::string r;
   r.append("VersionEdit {");

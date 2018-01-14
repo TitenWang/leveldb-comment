@@ -20,6 +20,7 @@
 
 namespace leveldb {
 
+// TargetFileSize()用于获取一个文件大小，这个文件大小是从Option实例中获取到的。
 static int TargetFileSize(const Options* options) {
   return options->max_file_size;
 }
@@ -606,25 +607,39 @@ class VersionSet::Builder {
   struct BySmallestKey {
     const InternalKeyComparator* internal_comparator;
 
+    // 实现比较两个FileMetaData类实例的大小。如果key值相同，那么就比较两个
+    // 的FileNumber，FileNumber大的那个文件就大。
     bool operator()(FileMetaData* f1, FileMetaData* f2) const {
       int r = internal_comparator->Compare(f1->smallest, f2->smallest);
       if (r != 0) {
         return (r < 0);
       } else {
         // Break ties by file number
+        // 在smallest key相同的情况下，FileNumber大的那个文件比
+        // FileNumber小的文件要“大”
         return (f1->number < f2->number);
       }
     }
   };
 
+  // 定义存放FileMetaData *对象的集合类型，其中比较器采用BySmallestKey。
   typedef std::set<FileMetaData*, BySmallestKey> FileSet;
+
+  // 要添加和删除的sstable文件集合，其中要删除的sstable文件集合中存放的是文件
+  // 对应的FileNumber，而要添加的文件集合中存放的则是文件对应的FileMetaData
+  // 类实例信息。
   struct LevelState {
     std::set<uint64_t> deleted_files;
     FileSet* added_files;
   };
 
+  // vset_用于存放VersionSet实例
   VersionSet* vset_;
+
+  // base_用于存放Version实例，这里的上下文含义就是基准版本。
   Version* base_;
+
+  // 各个level上面要更新（添加和删除）的文件集合。
   LevelState levels_[config::kNumLevels];
 
  public:
@@ -662,8 +677,15 @@ class VersionSet::Builder {
   }
 
   // Apply all of the edits in *edit to the current state.
+  // 将VersionEdit对象edit中的信息应用到VersionSet::Builder类实例中，换句话说
+  // 就是将版本变动信息添加到VersionSet::Builder类实例中，后面构建新的Version
+  // 的时候要用到。
   void Apply(VersionEdit* edit) {
     // Update compaction pointers
+    // 为了尽量均匀compact每个层级，所以会将这一次compact的end-key作为下一次
+    // compact的start-key，edit->compact_pointers_就保存了每一个level下一次compact的
+    // start-key，这里的操作就是将edit中保存的compact pointer信息添加到对应的
+    // VersionSet实例中。
     for (size_t i = 0; i < edit->compact_pointers_.size(); i++) {
       const int level = edit->compact_pointers_[i].first;
       vset_->compact_pointer_[level] =
@@ -671,6 +693,7 @@ class VersionSet::Builder {
     }
 
     // Delete files
+    // 将edit中存放的要删除的文件信息添加到levels_的deleted_files中。
     const VersionEdit::DeletedFileSet& del = edit->deleted_files_;
     for (VersionEdit::DeletedFileSet::const_iterator iter = del.begin();
          iter != del.end();
@@ -681,6 +704,7 @@ class VersionSet::Builder {
     }
 
     // Add new files
+    // 将edit中存放的要新增的文件信息添加到levels_的added_files中
     for (size_t i = 0; i < edit->new_files_.size(); i++) {
       const int level = edit->new_files_[i].first;
       FileMetaData* f = new FileMetaData(edit->new_files_[i].second);
@@ -699,6 +723,7 @@ class VersionSet::Builder {
       // same as the compaction of 40KB of data.  We are a little
       // conservative and allow approximately one seek for every 16KB
       // of data before triggering a compaction.
+      // 初始化文件在进行compact之前的最大允许访问次数
       f->allowed_seeks = (f->file_size / 16384);
       if (f->allowed_seeks < 100) f->allowed_seeks = 100;
 
@@ -708,17 +733,34 @@ class VersionSet::Builder {
   }
 
   // Save the current state in *v.
+  // 用VersionSet::Builder实例中存放的基准版本信息以及从VersionEdit实例中获取到的
+  // 版本变动信息一起构造出一个新的Version实例。
   void SaveTo(Version* v) {
     BySmallestKey cmp;
+	// 设置InternalComparator，用于对sstable文件中的key进行比较。
     cmp.internal_comparator = &vset_->icmp_;
     for (int level = 0; level < config::kNumLevels; level++) {
       // Merge the set of added files with the set of pre-existing files.
       // Drop any deleted files.  Store the result in *v.
+      // 获取基准版本base_中的level层的所有sstable文件
       const std::vector<FileMetaData*>& base_files = base_->files_[level];
       std::vector<FileMetaData*>::const_iterator base_iter = base_files.begin();
       std::vector<FileMetaData*>::const_iterator base_end = base_files.end();
+
+	  // 获取在level层要新增的文件集合，集合中的内容是从VersionEdit类实例中获取到的
+	  // 获取过程是在Apply()方法中实现的。
       const FileSet* added = levels_[level].added_files;
       v->files_[level].reserve(base_files.size() + added->size());
+
+	  // 下面的循环处理过程所做的事情就是将基准版本中level层的sstable文件和从VersionEdit
+	  // 类实例中获取到的新版本中要新增的sstable文件放在一起，共同组成新版本level层的
+	  // sstable文件集合。两者组合的规则如下：
+	  // 对于added集合中的每一个文件，先将base_files数组中小于该文件的所有文件添加到
+	  // 新版中中，然后将该文件添加到新版本中。这一过程持续到added集合中的所有文件
+	  // 都处理完毕，added集合中的文件处理完毕之后，可能base_files数组中可能还有部分文件
+	  // 还没有添加到新版本中，所以最后要将这部分文件也一并添加到新版本中。最后添加的
+	  // 这部分文件(不一定有)有一个特点就是这部分文件比added集合中所有文件都要"大"，当然
+	  // 这个"大"是根据FileMetaData * 对象的比较器来说的，比较器实现可以参考BySmallestKey。
       for (FileSet::const_iterator added_iter = added->begin();
            added_iter != added->end();
            ++added_iter) {
@@ -756,6 +798,9 @@ class VersionSet::Builder {
     }
   }
 
+  // MaybeAddFile()用于判断是否需要往Version实例v的level层中添加文件元信息对象f
+  // 如果文件元信息对象f已经在要删除的文件集合中，那就不往Version实例中添加这个
+  // 文件元信息对象了。否则的话，就将其添加到Version实例v的level层sstable文件vector中
   void MaybeAddFile(Version* v, int level, FileMetaData* f) {
     if (levels_[level].deleted_files.count(f->number) > 0) {
       // File is deleted: do nothing
