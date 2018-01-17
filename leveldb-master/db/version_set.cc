@@ -27,6 +27,8 @@ static int TargetFileSize(const Options* options) {
 
 // Maximum bytes of overlaps in grandparent (i.e., level+2) before we
 // stop building a single file in a level->level+1 compaction.
+// MaxGrandParentOverlapBytes()计算level+2层级和正在compact的level层级最大重叠的
+// 字节数。
 static int64_t MaxGrandParentOverlapBytes(const Options* options) {
   return 10 * TargetFileSize(options);
 }
@@ -38,6 +40,7 @@ static int64_t ExpandedCompactionByteSizeLimit(const Options* options) {
   return 25 * TargetFileSize(options);
 }
 
+// MaxBytesForLevel()计算每个层级最大可以有的字节数
 static double MaxBytesForLevel(const Options* options, int level) {
   // Note: the result for level zero is not really used since we set
   // the level-0 compaction threshold based on number of files.
@@ -51,11 +54,13 @@ static double MaxBytesForLevel(const Options* options, int level) {
   return result;
 }
 
+// MaxFileSizeForLevel()计算层级中每个文件的最大大小。
 static uint64_t MaxFileSizeForLevel(const Options* options, int level) {
   // We could vary per level to reduce number of files?
   return TargetFileSize(options);
 }
 
+// TotalFileSize()函数用于计算files动态数组中存放的文件元信息对应的文件总大小。
 static int64_t TotalFileSize(const std::vector<FileMetaData*>& files) {
   int64_t sum = 0;
   for (size_t i = 0; i < files.size(); i++) {
@@ -84,14 +89,49 @@ Version::~Version() {
   }
 }
 
+// 采用二分查找算法找到所存放的最大key值不小于参数key值的第一个文件元信息对象
+// 在files数组中的下标。这里的"第一个"的意思就是值在files数组中所有最大key值
+// 不小于参数key的元素中下标最小的那个。这个查找的结果也不一定就能说明参数key
+// 一定会落在最终找到的那个文件中。我们知道虽然在一个层级(非0层)中所有文件的
+// key是有序的，递增的，但文件和文件之间的key值是不连续的，如下图所示：
+// |  files0 |    |  files1    |  | files2   | files3 |
+// ----------------------------------------------------
+// 假设上面的图中区间就是对应文件元信息存放的key值范围，从图中可以看到文件
+// 和文件之间有可能存在部分key空间是不在两个文件中，如果某个key值不小于files2的
+// 最大key值，而又大于files1的最大key值，那么FindFile()函数返回的文件元信息下标
+// 就是图中files2对应的下标，但是不能说明参数key就一定会落在files2中，有可能会
+// 在files1和files2之间那部分的空白key空间中。
 int FindFile(const InternalKeyComparator& icmp,
              const std::vector<FileMetaData*>& files,
              const Slice& key) {
   uint32_t left = 0;
+
+	// right初始存放的是files中文件元信息对象的个数。
   uint32_t right = files.size();
+
+	// 采用二分查找算法找到所存放的最大key值不小于参数key值的第一个文件元信息对象
+	// 在files数组中的下标。这里的"第一个"的意思就是值在files数组中所有最大key值
+	// 不小于参数key的元素中下标最小的那个。这个查找的结果也不一定就能说明参数key
+	// 一定会落在最终找到的那个文件中。我们知道虽然在一个层级(非0层)中所有文件的
+	// key是有序的，递增的，但文件和文件之间的key值是不连续的，如下图所示：
+	//
+	// |  files0 |    |  files1    |  | files2   | files3 |
+	// ----------------------------------------------------
+	// 假设上面的图中区间就是对应文件元信息存放的key值范围，从图中可以看到文件
+	// 和文件之间有可能存在部分key空间是不在两个文件中，如果某个key值不小于files2的
+	// 最大key值，而又大于files1的最大key值，那么FindFile()函数返回的文件元信息下标
+	// 就是图中files2对应的下标，但是不能说明参数key就一定会落在files2中，有可能会
+	// 在files1和files2之间那部分的空白key空间中。
+
+	// 这里为什么采用二分查找算法呢？因为在一个层级(非0层)中，所有的sstable文件
+	// 中的key都是不重合的，并且是递增的，所以在这种有序状态下可以采用二分法
+	// 提高查找效率。
   while (left < right) {
     uint32_t mid = (left + right) / 2;
     const FileMetaData* f = files[mid];
+
+		// 和f的最大key值比较，如果比最大key值大，说明key不可能落在f及f之前的那些文件中
+		// 那么从f后一个文件继续查找。
     if (icmp.InternalKeyComparator::Compare(f->largest.Encode(), key) < 0) {
       // Key at "mid.largest" is < "target".  Therefore all
       // files at or before "mid" are uninteresting.
@@ -105,6 +145,9 @@ int FindFile(const InternalKeyComparator& icmp,
   return right;
 }
 
+// AfterFile()函数用于判断user_key是不是会落在文件元信息对象f对应的sstable文件后面，
+// 换句话说就是判断user_key是不是比f对应的sstable文件的最大key值还要大，如果是，那么
+// 就返回true;否则，返回false。
 static bool AfterFile(const Comparator* ucmp,
                       const Slice* user_key, const FileMetaData* f) {
   // NULL user_key occurs before all keys and is therefore never after *f
@@ -112,6 +155,9 @@ static bool AfterFile(const Comparator* ucmp,
           ucmp->Compare(*user_key, f->largest.user_key()) > 0);
 }
 
+// BeforeFile()函数用于判断user_key是不是会落在文件元信息f对应的sstable文件前面，
+// 换句话说就是判断user_key是不是比f对应的sstable文件中的最小key值还要小，如果是，那么
+// 就返回true;否则，返回false。
 static bool BeforeFile(const Comparator* ucmp,
                        const Slice* user_key, const FileMetaData* f) {
   // NULL user_key occurs after all keys and is therefore never before *f
@@ -119,6 +165,9 @@ static bool BeforeFile(const Comparator* ucmp,
           ucmp->Compare(*user_key, f->smallest.user_key()) < 0);
 }
 
+// SomeFileOverlapsRange()函数用于判断files文件中是否有文件的key值范围
+// 和[*smallest_user_key, *largest_user_key]有重叠，如果有的话，那么就返回
+// true。
 bool SomeFileOverlapsRange(
     const InternalKeyComparator& icmp,
     bool disjoint_sorted_files,
@@ -126,10 +175,17 @@ bool SomeFileOverlapsRange(
     const Slice* smallest_user_key,
     const Slice* largest_user_key) {
   const Comparator* ucmp = icmp.user_comparator();
+
+	// disjoint_sorted_files为false的话，需要检查第0层的所有文件。
+	// 而第0层的文件由于互相之间有重叠，所以需要检查所有文件。
   if (!disjoint_sorted_files) {
     // Need to check against all files
     for (size_t i = 0; i < files.size(); i++) {
       const FileMetaData* f = files[i];
+
+			// 如果smallest_user_key在f之后，或者largest_user_key在f之前，
+			// 那么说明f和[*smallest_user_key, *largest_user_key]没有重叠
+			// 否则的话，有重叠返回true。
       if (AfterFile(ucmp, smallest_user_key, f) ||
           BeforeFile(ucmp, largest_user_key, f)) {
         // No overlap
@@ -141,7 +197,26 @@ bool SomeFileOverlapsRange(
   }
 
   // Binary search over file list
+  // 因为从第1层开始，每一层的所有sstable文件的key是没有重叠的，所以
+  // 可以用二分法来查找可能和[*smallest_user_key, *largest_user_key]有
+  // 重叠的文件。
   uint32_t index = 0;
+
+	// 这里用smallest_user_key通过调用FindFile()到每一层的所有sstable中进行查找，
+	// FindFile()会采用二分查找算法找到所存放的最大key值不小于smallest_user_key的
+	// 第一个文件元信息对象。如果找到了这样的文件元信息对象，说明其对应的文件可能
+	// 会和[*smallest_user_key, *largest_user_key]有重叠，但还需要进一步判断，即通过
+	// 判断largest_user_key是否比该文件存放的最小key值还小，如果小的话，说明该文件
+	// 其实和[*smallest_user_key, *largest_user_key]并没有重叠;如果大的话，说明
+	// 该文件和[*smallest_user_key, *largest_user_key]是有重叠部分的。举例如下：
+	//
+	// |  files0 |    |  files1    |  | files2   | files3 |
+	// ----------------------------------------------------
+	// 假设通过FindFile()找到的文件元信息对象是files2的，那么[*smallest_user_key,
+	// *largest_user_key]范围此时可能在(files1.max_key, files2.max_key]之间，所以
+	// 需要进一步看是否[*smallest_user_key, *largest_user_key]会落在(files1.max_key,
+	// files2.min_key)之间，如果是的话，说明其实并没有重叠。
+
   if (smallest_user_key != NULL) {
     // Find the earliest possible internal key for smallest_user_key
     InternalKey small(*smallest_user_key, kMaxSequenceNumber,kValueTypeForSeek);
@@ -161,6 +236,9 @@ bool SomeFileOverlapsRange(
 // is the largest key that occurs in the file, and value() is an
 // 16-byte value containing the file number and file size, both
 // encoded using EncodeFixed64.
+// Version::LevelFileNumIterator类是一个迭代器的实现类，用于迭代一个
+// 存放这文件元信息对象的动态数组，在实际使用的时候通常用于迭代某个
+// level中的所有sstable对应的文件元信息对象。
 class Version::LevelFileNumIterator : public Iterator {
  public:
   LevelFileNumIterator(const InternalKeyComparator& icmp,
@@ -172,17 +250,33 @@ class Version::LevelFileNumIterator : public Iterator {
   virtual bool Valid() const {
     return index_ < flist_->size();
   }
+
+	// Seek()接口用于使迭代器指向所存放的最大key值大于等于target的
+	// 第一个文件元信息对象，这里的"第一个"的意思就是值在files数组中
+	// 所有最大key值不小于target的元素中下标最小的那个。
   virtual void Seek(const Slice& target) {
     index_ = FindFile(icmp_, *flist_, target);
   }
+
+	// SeekToFirst()使迭代器指向flist_数组中的第一个文件元信息对象。
   virtual void SeekToFirst() { index_ = 0; }
+
+	// SeekToLast()使迭代器指向flist_数组中的最后一个文件元信息对象。
   virtual void SeekToLast() {
     index_ = flist_->empty() ? 0 : flist_->size() - 1;
   }
+
+	// Next()使迭代器指向flist_数组中的下一个文件元信息对象，具体做法
+	// 就是将数组的索引加1.
   virtual void Next() {
     assert(Valid());
     index_++;
   }
+
+	// Prev()使迭代器指向flist_数组中的前一个文件元信息对象，具体做法就是
+	// 将数组索引减1.如果在减1之前就已经指向第一个文件元信息对象的话，那么
+	// 执行Prev()就应该是一个无效的迭代器了，所以这里将索引设置成flist_->size()。
+	// 因为索引的有效范围是[0, flist_->size() -1]。
   virtual void Prev() {
     assert(Valid());
     if (index_ == 0) {
@@ -191,10 +285,15 @@ class Version::LevelFileNumIterator : public Iterator {
       index_--;
     }
   }
+
+	// key()方法用于获取迭代器指向的文件元信息对象中存放的最大key值。
   Slice key() const {
     assert(Valid());
     return (*flist_)[index_]->largest.Encode();
   }
+
+	// value()方法用于获取迭代器指向的文件元信息对象中存放的FileNumber和
+	// file size，并编码在一个16字节的字符数组中。
   Slice value() const {
     assert(Valid());
     EncodeFixed64(value_buf_, (*flist_)[index_]->number);
@@ -203,28 +302,46 @@ class Version::LevelFileNumIterator : public Iterator {
   }
   virtual Status status() const { return Status::OK(); }
  private:
+
+	// 比较器。
   const InternalKeyComparator icmp_;
+
+	// 存放文件元信息对象的动态数组。
   const std::vector<FileMetaData*>* const flist_;
+
+	// 存放文件元信息对象的动态数组的索引。
   uint32_t index_;
 
   // Backing store for value().  Holds the file number and size.
+  // 用于存放LevelFileNumberIterator迭代器的值信息，见value()方法。
   mutable char value_buf_[16];
 };
 
+// GetFileIterator()函数用于获取某个指定sstable文件的迭代器，这个迭代器
+// 可以用于获取sstable文件中的key-value信息，其实这个迭代器本身也是一个
+// 二级迭代器。
 static Iterator* GetFileIterator(void* arg,
                                  const ReadOptions& options,
                                  const Slice& file_value) {
+	// arg参数存放的是上层调用者传入的参数，在这里是一个TableCache类实例，
+	// 可以参考下面的Version::NewConcatentingIterator()方法。
   TableCache* cache = reinterpret_cast<TableCache*>(arg);
   if (file_value.size() != 16) {
     return NewErrorIterator(
         Status::Corruption("FileReader invoked with unexpected value"));
   } else {
+		// file_value中存放了目标sstable文件的FileNumber和file size，这两个信息
+		// 在LevelFileNumberIterator迭代器的value()方法中可以获取到。然后根据
+		// 这两个信息可以获取到TableCache类实例的迭代器。
     return cache->NewIterator(options,
                               DecodeFixed64(file_value.data()),
                               DecodeFixed64(file_value.data() + 8));
   }
 }
 
+// NewConcatenatingIterator()方法用于获取一个二级迭代器，这个二级迭代器可以用于
+// 迭代器某一个层级(level>0)中的所有sstable，并从中获取到key-value信息。当然key需要
+// 由上层调用者传入，否则内部也不知道上层调用者需要Get什么key的value。
 Iterator* Version::NewConcatenatingIterator(const ReadOptions& options,
                                             int level) const {
   return NewTwoLevelIterator(
@@ -232,6 +349,12 @@ Iterator* Version::NewConcatenatingIterator(const ReadOptions& options,
       &GetFileIterator, vset_->table_cache_, options);
 }
 
+// AddIterators()方法用于某个版本(Version)中所有sstable的迭代器，这样就可以
+// 通过获取到的迭代器数组依次获取这个版本中的key-value信息。我们知道，level0
+// 中的sstable之间可能存在key重叠的情况，所以对level0中的所有sstable文件作为
+// 独立个体分别创建一个迭代器。而其余level在同level的sstable文件之间是不存在
+// key重叠的，所以可以通过NewConcatenatingIterator来创建一个对于整个level的
+// 迭代器。
 void Version::AddIterators(const ReadOptions& options,
                            std::vector<Iterator*>* iters) {
   // Merge all level zero files together since they may overlap
