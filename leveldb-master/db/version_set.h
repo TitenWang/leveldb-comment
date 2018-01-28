@@ -129,21 +129,29 @@ class Version {
                           void* arg,
                           bool (*func)(void*, int, FileMetaData*));
 
+	// vset_是对应的VersionSet类实例
   VersionSet* vset_;            // VersionSet to which this Version belongs
+
+  // next_和prev_用于将多个Version类实例以链表方式管理起来
   Version* next_;               // Next version in linked list
   Version* prev_;               // Previous version in linked list
+
+  // refs_是版本的引用计数。
   int refs_;                    // Number of live refs to this version
 
   // List of files per level
+  // files_存放了该版本中每一个层级的所有sstable文件对应的文件元信息对象
   std::vector<FileMetaData*> files_[config::kNumLevels];
 
   // Next file to compact based on seek stats.
+  // 存放将要进行compact的sstable文件对应的文件元信息对象及所在的level。
   FileMetaData* file_to_compact_;
   int file_to_compact_level_;
 
   // Level that should be compacted next and its compaction score.
   // Score < 1 means compaction is not strictly needed.  These fields
   // are initialized by Finalize().
+  // compact的分值以及对应的需要进行compact的level。
   double compaction_score_;
   int compaction_level_;
 
